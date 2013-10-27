@@ -4,6 +4,9 @@
 
 -define(RECORDS_PER_PAGE, 100).
 
+before_(_) ->
+    cb_admin_lib:require_ip_address(Req).
+
 heartbeat('POST', [WatchName], Authorization) ->
     boss_news:extend_watch(list_to_integer(WatchName)),
     {output, ""}.
@@ -21,14 +24,16 @@ events('GET', [Since], Authorization) ->
 model('GET', [], Authorization) ->
     {ok, [{model_section, true}, {records, []}, 
             {models, boss_web:get_all_models()}, 
-            {this_model, ""}, {topic_string, ""}]};
+            {this_model, ""}, {topic_string, ""},
+            {timestamp, now()}]};
 model('GET', [ModelName], Authorization) ->
     model('GET', [ModelName, "1"], Authorization);
 model('GET', [ModelName, PageName], Authorization) ->
     Page = list_to_integer(PageName),
     Model = list_to_atom(ModelName),
     RecordCount = boss_db:count(Model),
-    Records = boss_db:find(Model, [], ?RECORDS_PER_PAGE, (Page - 1) * ?RECORDS_PER_PAGE, id, str_descending),
+    Records = boss_db:find(Model, [], [{limit, ?RECORDS_PER_PAGE}, 
+            {offset, (Page - 1) * ?RECORDS_PER_PAGE}, descending]),
     TopicString = string:join(lists:map(fun(Record) -> Record:id() ++ ".*" end, Records), ", "),
     AttributesWithDataTypes = lists:map(fun(Record) ->
                 {Record:id(), lists:map(fun({Key, Val}) ->
@@ -49,7 +54,7 @@ model('GET', [ModelName, PageName], Authorization) ->
 
 csv('GET', [ModelName], Authorization) ->
     Model = list_to_atom(ModelName),
-    [First|_] = Records = boss_db:find(Model, [], all, 0, id, str_descending),
+    [First|_] = Records = boss_db:find(Model, [], [descending]),
     FirstLine = [lists:foldr(fun
                 (Attr, []) ->
                     [atom_to_list(Attr)];
@@ -81,7 +86,7 @@ upload('POST', [ModelName], Authorization) ->
                 {_, Record} = lists:foldl(fun(Val, {Counter, Acc}) ->
                             AttrName = lists:nth(Counter, Head),
                             Attr = list_to_atom(AttrName),
-                            {Counter + 1, Acc:Attr(Val)}
+                            {Counter + 1, Acc:set(Attr, Val)}
                     end, {1, DummyRecord}, Line),
                 Record
         end, Rest),
@@ -113,10 +118,10 @@ edit('POST', [RecordId], Authorization) ->
                 Val = Req:post_param(AttrName),
                 case lists:suffix("_time", AttrName) of
                     true ->
-                        case Val of "now" -> Acc:Attr(erlang:now());
+                        case Val of "now" -> Acc:set(Attr, erlang:now());
                             _ -> Acc
                         end;
-                    false -> Acc:Attr(Val)
+                    false -> Acc:set(Attr, Val)
                 end
         end, Record, Record:attribute_names()),
     case NewRecord:save() of
@@ -143,7 +148,7 @@ create(Method, [RecordType], Authorization) ->
                     {ok, [{type, RecordType}, {'record', DummyRecord}]};
                 'POST' ->
                     Record = lists:foldr(fun
-                                ('id', Acc) -> Acc:id('id');
+                                ('id', Acc) -> Acc:set(id, 'id');
                                 (Attr, Acc) ->
                                     AttrName = atom_to_list(Attr),
                                     Val = Req:post_param(AttrName),
@@ -155,7 +160,7 @@ create(Method, [RecordType], Authorization) ->
                                             end;
                                         _ -> Val
                                     end,
-                                    Acc:Attr(Val1)
+                                    Acc:set(Attr, Val1)
                             end, DummyRecord, DummyRecord:attribute_names()),
                     case Record:save() of
                         {ok, SavedRecord} ->

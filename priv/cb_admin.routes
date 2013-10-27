@@ -1,5 +1,5 @@
-%% The {Controller, Action} pair to be used on the home page. Defaults to {"hello", "world"}
-%% Format: {"Controller", "Action"}
+%% The controller/action pair to be used on the home page.
+%% Format: [{controller, "Controller"}, {action, "Action"}]
 
 {"/", [{controller, "admin"}, {action, "index"}]}.
 
